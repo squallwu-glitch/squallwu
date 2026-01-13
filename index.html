@@ -1,0 +1,485 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <title>小貓鮮魚挑戰：觸控導航版</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=ZCOOL+KuaiLe&display=swap');
+
+        * {
+            font-family: 'ZCOOL KuaiLe', cursive, sans-serif !important;
+            box-sizing: border-box;
+            -webkit-tap-highlight-color: transparent;
+        }
+
+        body, html {
+            margin: 0;
+            padding: 0;
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+            background-color: #fce4ec;
+            touch-action: none; 
+        }
+
+        #game-container {
+            position: relative;
+            width: 100vw;
+            height: 100vh;
+            background: #a5d6a7;
+            background-image: radial-gradient(#81c784 15%, transparent 15%),
+                              radial-gradient(#81c784 15%, transparent 15%);
+            background-position: 0 0, 25px 25px;
+            background-size: 50px 50px;
+        }
+
+        .sprite {
+            position: absolute;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 45px;
+            z-index: 10;
+        }
+
+        .wall {
+            position: absolute;
+            background: #795548;
+            border: 2px solid #5d4037;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 20px;
+            z-index: 5;
+            border-radius: 8px;
+            box-shadow: inset 0 0 10px rgba(0,0,0,0.3);
+        }
+
+        .fish {
+            position: absolute;
+            font-size: 35px;
+            z-index: 4;
+            filter: drop-shadow(2px 2px 2px rgba(0,0,0,0.2));
+        }
+
+        #ui-layer {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            z-index: 100;
+            pointer-events: none;
+        }
+
+        .stat-card {
+            background: rgba(255, 255, 255, 0.9);
+            padding: 12px 24px;
+            border-radius: 25px;
+            margin-bottom: 12px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            font-size: 24px;
+            color: #444;
+        }
+
+        #overlay {
+            position: absolute;
+            inset: 0;
+            background: rgba(0, 0, 0, 0.8);
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            z-index: 200;
+            color: white;
+            text-align: center;
+        }
+
+        #overlay.hidden {
+            display: none !important;
+        }
+
+        .btn {
+            background: #ff80ab;
+            color: white;
+            padding: 18px 50px;
+            border-radius: 40px;
+            font-size: 28px;
+            cursor: pointer;
+            border: none;
+            box-shadow: 0 6px 0 #c94b7c;
+            transition: all 0.1s;
+            margin-top: 20px;
+            pointer-events: auto;
+        }
+
+        .btn:active {
+            transform: translateY(4px);
+            box-shadow: 0 2px 0 #c94b7c;
+        }
+
+        /* 觸控搖桿視覺回饋 */
+        #joystick-base {
+            position: absolute;
+            width: 100px;
+            height: 100px;
+            background: rgba(255, 255, 255, 0.2);
+            border: 2px solid rgba(255, 255, 255, 0.4);
+            border-radius: 50%;
+            display: none;
+            pointer-events: none;
+            z-index: 150;
+        }
+        #joystick-stick {
+            position: absolute;
+            width: 40px;
+            height: 40px;
+            background: rgba(255, 255, 255, 0.6);
+            border-radius: 50%;
+            top: 30px;
+            left: 30px;
+            pointer-events: none;
+        }
+    </style>
+</head>
+<body>
+
+<div id="game-container">
+    <div id="ui-layer">
+        <div class="stat-card">
+            <span>🐟 收集:</span>
+            <span id="score-val">0</span>
+        </div>
+        <div class="stat-card">
+            <span>⏰ 剩餘:</span>
+            <span id="timer-val">60s</span>
+        </div>
+    </div>
+
+    <div id="cat" class="sprite">🐱</div>
+    
+    <!-- 搖桿 -->
+    <div id="joystick-base">
+        <div id="joystick-stick"></div>
+    </div>
+
+    <div id="overlay">
+        <div id="overlay-content" class="flex flex-col items-center max-w-lg px-6">
+            <h1 id="overlay-title" class="text-6xl mb-6 font-bold">小貓鮮魚挑戰</h1>
+            <div id="overlay-desc" class="text-2xl mb-8">
+                💻 電腦：方向鍵 或 WASD 移動<br>
+                📱 iPad：手指在畫面任意處滑動導向
+            </div>
+            <button id="start-btn" class="btn">開始冒險</button>
+        </div>
+    </div>
+</div>
+
+<script>
+    const catEl = document.getElementById('cat');
+    const container = document.getElementById('game-container');
+    const scoreVal = document.getElementById('score-val');
+    const timerVal = document.getElementById('timer-val');
+    const overlay = document.getElementById('overlay');
+    const overlayTitle = document.getElementById('overlay-title');
+    const overlayDesc = document.getElementById('overlay-desc');
+    const startBtn = document.getElementById('start-btn');
+    const joystickBase = document.getElementById('joystick-base');
+    const joystickStick = document.getElementById('joystick-stick');
+
+    let state = {
+        playing: false,
+        score: 0,
+        timeLeft: 60,
+        catPos: { x: 0, y: 0 },
+        dogs: [],
+        cans: [],
+        walls: [],
+        keys: {},
+        speed: 6,
+        gameLoopId: null,
+        timerId: null,
+        // 觸控控制
+        touchActive: false,
+        touchStart: { x: 0, y: 0 },
+        touchCurrent: { x: 0, y: 0 }
+    };
+
+    // --- 鍵盤控制 ---
+    window.addEventListener('keydown', (e) => {
+        if(["Space","ArrowUp","ArrowDown","ArrowLeft","ArrowRight"].indexOf(e.code) > -1) e.preventDefault();
+        state.keys[e.key] = true;
+    });
+    window.addEventListener('keyup', (e) => state.keys[e.key] = false);
+
+    // --- 觸控控制 (手動導向) ---
+    container.addEventListener('pointerdown', (e) => {
+        if (!state.playing) return;
+        state.touchActive = true;
+        state.touchStart = { x: e.clientX, y: e.clientY };
+        state.touchCurrent = { x: e.clientX, y: e.clientY };
+        
+        // 顯示搖桿 UI
+        joystickBase.style.display = 'block';
+        joystickBase.style.left = `${e.clientX - 50}px`;
+        joystickBase.style.top = `${e.clientY - 50}px`;
+        joystickStick.style.transform = `translate(0px, 0px)`;
+    });
+
+    window.addEventListener('pointermove', (e) => {
+        if (!state.touchActive) return;
+        state.touchCurrent = { x: e.clientX, y: e.clientY };
+        
+        // 更新搖桿視覺
+        const dx = state.touchCurrent.x - state.touchStart.x;
+        const dy = state.touchCurrent.y - state.touchStart.y;
+        const dist = Math.min(Math.hypot(dx, dy), 40);
+        const angle = Math.atan2(dy, dx);
+        const stickX = Math.cos(angle) * dist;
+        const stickY = Math.sin(angle) * dist;
+        joystickStick.style.transform = `translate(${stickX}px, ${stickY}px)`;
+    });
+
+    window.addEventListener('pointerup', () => {
+        state.touchActive = false;
+        joystickBase.style.display = 'none';
+    });
+
+    function initPositions() {
+        state.catPos = { x: window.innerWidth / 2 - 25, y: window.innerHeight / 2 - 25 };
+        catEl.style.left = `${state.catPos.x}px`;
+        catEl.style.top = `${state.catPos.y}px`;
+    }
+
+    function createWalls() {
+        state.walls.forEach(w => w.el.remove());
+        state.walls = [];
+        const cols = 4;
+        const rows = 3;
+        const cellW = window.innerWidth / cols;
+        const cellH = window.innerHeight / rows;
+
+        for (let r = 0; r < rows; r++) {
+            for (let c = 0; c < cols; c++) {
+                if (Math.random() > 0.45) {
+                    const w = Math.random() * 60 + 50;
+                    const h = Math.random() * 40 + 40;
+                    const x = (c * cellW) + Math.random() * (cellW - w);
+                    const y = (r * cellH) + Math.random() * (cellH - h);
+                    if (Math.hypot(x - window.innerWidth/2, y - window.innerHeight/2) < 150) continue;
+                    const wallEl = document.createElement('div');
+                    wallEl.className = 'wall';
+                    wallEl.innerHTML = '🧱';
+                    wallEl.style.width = `${w}px`;
+                    wallEl.style.height = `${h}px`;
+                    wallEl.style.left = `${x}px`;
+                    wallEl.style.top = `${y}px`;
+                    container.appendChild(wallEl);
+                    state.walls.push({ el: wallEl, x, y, w, h });
+                }
+            }
+        }
+    }
+
+    function checkWallCollision(newX, newY, size = 40) {
+        return state.walls.some(w => 
+            newX < w.x + w.w &&
+            newX + size > w.x &&
+            newY < w.y + w.h &&
+            newY + size > w.y
+        );
+    }
+
+    function spawnFish() {
+        const fish = document.createElement('div');
+        fish.className = 'fish';
+        fish.innerHTML = '🐟';
+        let x, y, isInsideWall, attempts = 0;
+        do {
+            x = Math.random() * (window.innerWidth - 80) + 40;
+            y = Math.random() * (window.innerHeight - 80) + 40;
+            isInsideWall = checkWallCollision(x, y, 40);
+            attempts++;
+        } while (isInsideWall && attempts < 20);
+        fish.style.left = `${x}px`;
+        fish.style.top = `${y}px`;
+        container.appendChild(fish);
+        state.cans.push({ el: fish, x, y });
+    }
+
+    function spawnDog(index) {
+        if (state.dogs.length >= 3) return;
+        const dog = document.createElement('div');
+        dog.className = 'sprite';
+        dog.innerHTML = '🐶';
+        const regionWidth = window.innerWidth / 3;
+        const regionX = index * regionWidth;
+        let x, y, isInsideWall, attempts = 0;
+        do {
+            x = regionX + Math.random() * (regionWidth - 60);
+            y = Math.random() * (window.innerHeight - 60);
+            isInsideWall = checkWallCollision(x, y, 50);
+            attempts++;
+        } while (isInsideWall && attempts < 30);
+        dog.style.left = `${x}px`;
+        dog.style.top = `${y}px`;
+        container.appendChild(dog);
+        state.dogs.push({ 
+            el: dog, x, y, 
+            speed: 2 + Math.random() * 0.5,
+            mode: 'patrol',
+            region: { minX: regionX, maxX: regionX + regionWidth },
+            target: { x, y },
+            detectionRange: 280
+        });
+    }
+
+    function gameLoop() {
+        if (!state.playing) return;
+        let nextX = state.catPos.x;
+        let nextY = state.catPos.y;
+
+        // 計算鍵盤移動向量
+        let dx = 0, dy = 0;
+        if (state.keys['ArrowUp'] || state.keys['w'] || state.keys['W']) dy -= 1;
+        if (state.keys['ArrowDown'] || state.keys['s'] || state.keys['S']) dy += 1;
+        if (state.keys['ArrowLeft'] || state.keys['a'] || state.keys['A']) dx -= 1;
+        if (state.keys['ArrowRight'] || state.keys['d'] || state.keys['D']) dx += 1;
+
+        // 計算觸控移動向量
+        if (state.touchActive) {
+            const tdx = state.touchCurrent.x - state.touchStart.x;
+            const tdy = state.touchCurrent.y - state.touchStart.y;
+            const dist = Math.hypot(tdx, tdy);
+            if (dist > 5) { // 稍微有一點偏移才開始移動
+                dx = tdx / dist;
+                dy = tdy / dist;
+            }
+        }
+
+        if (dx !== 0 || dy !== 0) {
+            nextX += dx * state.speed;
+            nextY += dy * state.speed;
+            if (dx < 0) catEl.style.transform = 'scaleX(-1)';
+            if (dx > 0) catEl.style.transform = 'scaleX(1)';
+        }
+
+        nextX = Math.max(0, Math.min(window.innerWidth - 45, nextX));
+        nextY = Math.max(0, Math.min(window.innerHeight - 45, nextY));
+
+        if (!checkWallCollision(nextX, nextY)) {
+            state.catPos.x = nextX;
+            state.catPos.y = nextY;
+        }
+
+        catEl.style.left = `${state.catPos.x}px`;
+        catEl.style.top = `${state.catPos.y}px`;
+
+        // 收集鮮魚
+        for (let i = state.cans.length - 1; i >= 0; i--) {
+            const f = state.cans[i];
+            if (Math.hypot(f.x - state.catPos.x, f.y - state.catPos.y) < 50) {
+                f.el.remove();
+                state.cans.splice(i, 1);
+                state.score++;
+                scoreVal.innerText = state.score;
+                spawnFish();
+            }
+        }
+
+        // 狗狗 AI
+        state.dogs.forEach(dog => {
+            const distToCat = Math.hypot(dog.x - state.catPos.x, dog.y - state.catPos.y);
+            if (distToCat < dog.detectionRange && state.catPos.x > dog.region.minX && state.catPos.x < dog.region.maxX) {
+                dog.mode = 'chase';
+            } else {
+                dog.mode = 'patrol';
+            }
+
+            if (dog.mode === 'chase') {
+                dog.target.x = state.catPos.x;
+                dog.target.y = state.catPos.y;
+            } else if (Math.hypot(dog.x - dog.target.x, dog.y - dog.target.y) < 30) {
+                dog.target.x = dog.region.minX + Math.random() * (dog.region.maxX - dog.region.minX - 60);
+                dog.target.y = Math.random() * (window.innerHeight - 60);
+            }
+
+            const angle = Math.atan2(dog.target.y - dog.y, dog.target.x - dog.x);
+            const moveX = Math.cos(angle) * (dog.mode === 'chase' ? dog.speed * 1.4 : dog.speed);
+            const moveY = Math.sin(angle) * (dog.mode === 'chase' ? dog.speed * 1.4 : dog.speed);
+
+            if (!checkWallCollision(dog.x + moveX, dog.y + moveY, 45)) {
+                dog.x += moveX;
+                dog.y += moveY;
+            } else {
+                dog.target.x = dog.region.minX + Math.random() * (dog.region.maxX - dog.region.minX - 60);
+                dog.target.y = Math.random() * (window.innerHeight - 60);
+            }
+
+            dog.el.style.left = `${dog.x}px`;
+            dog.el.style.top = `${dog.y}px`;
+            dog.el.style.transform = dog.target.x < dog.x ? 'scaleX(-1)' : 'scaleX(1)';
+            if (distToCat < 40) endGame(true);
+        });
+
+        state.gameLoopId = requestAnimationFrame(gameLoop);
+    }
+
+    function startGame() {
+        cancelAnimationFrame(state.gameLoopId);
+        clearInterval(state.timerId);
+        state.dogs.forEach(d => d.el.remove());
+        state.cans.forEach(f => f.el.remove());
+        state.dogs = []; state.cans = [];
+        state.score = 0; state.timeLeft = 60; state.playing = true;
+        scoreVal.innerText = "0";
+        timerVal.innerText = "60s";
+        overlay.classList.add('hidden');
+        createWalls();
+        initPositions();
+        for(let i=0; i<6; i++) spawnFish();
+        spawnDog(0);
+        state.timerId = setInterval(() => {
+            if (!state.playing) return;
+            state.timeLeft--;
+            timerVal.innerText = `${state.timeLeft}s`;
+            if (state.timeLeft === 45) spawnDog(1);
+            if (state.timeLeft === 30) spawnDog(2);
+            if (state.timeLeft <= 0) endGame(false);
+        }, 1000);
+        gameLoop();
+    }
+
+    function endGame(isCaught) {
+        state.playing = false;
+        overlay.classList.remove('hidden');
+        joystickBase.style.display = 'none';
+        state.touchActive = false;
+        if (isCaught) {
+            overlayTitle.innerText = "被抓到了！";
+            overlayTitle.style.color = "#ff8a80";
+            overlayDesc.innerHTML = `<p class="text-2xl">剛才那隻狗狗跑太快了，再接再厲！</p>`;
+            startBtn.innerText = "重新挑戰";
+            return;
+        }
+        const level = Math.floor(state.score / 10);
+        overlay.style.background = "rgba(255, 182, 193, 0.98)";
+        overlayTitle.style.color = "#d81b60";
+        let endingMsg = "", emoji = "";
+        if (level === 0) { overlayTitle.innerText = "結局 1：有點寂寞"; emoji = "😿"; endingMsg = `收集了 ${state.score} 條魚。`; }
+        else if (level === 1) { overlayTitle.innerText = "結局 2：溫飽生活"; emoji = "🐱🍛"; endingMsg = `不錯喔！有 ${state.score} 條魚。`; }
+        else if (level === 2) { overlayTitle.innerText = "結局 3：鮮魚派對"; emoji = "🥳🐟"; endingMsg = `厲害！這 ${state.score} 條魚夠吃好幾天！`; }
+        else { overlayTitle.innerText = "結局 4：捕魚貓神"; emoji = "👑🐱"; endingMsg = `傳說級！一共收集了 ${state.score} 條魚！`; }
+        overlayDesc.innerHTML = `<div class="text-7xl mb-4">${emoji}</div><p class="text-3xl text-gray-800">${endingMsg}</p>`;
+        startBtn.innerText = "挑戰更高分";
+    }
+
+    startBtn.addEventListener('click', startGame);
+    initPositions();
+</script>
+
+</body>
+</html>
